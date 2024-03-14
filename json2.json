@@ -1,0 +1,88 @@
+{
+  "metadata": {
+    "name": "example.com.",
+    "namespace": "",
+    "labels": {},
+    "annotations": {},
+    "description": "",
+    "disable": false
+  },
+  "spec": {
+    "primary": {
+      "default_soa_parameters": {
+        "refresh": 3600,
+        "retry": 600,
+        "expire": 604800,
+        "negative_ttl": 1800,
+        "ttl": 3600
+      },
+      "default_rr_set_group": [
+        {
+          "ttl": 3600,
+          "txt_record": {
+            "values": [
+              "\"v=spf1 includespf.dynect.net ~all\""
+            ]
+          }
+        },
+        {
+          "ttl": 3600,
+          "a_record": {
+            "name": "mail",
+            "values": [
+              "204.13.248.106"
+            ]
+          }
+        },
+        {
+          "ttl": 3600,
+          "a_record": {
+            "name": "vpn",
+            "values": [
+              "216.146.45.240"
+            ]
+          }
+        },
+        {
+          "ttl": 3600,
+          "a_record": {
+            "name": "webapp",
+            "values": [
+              "216.146.46.10"
+            ]
+          }
+        },
+        {
+          "ttl": 3600,
+          "a_record": {
+            "name": "webapp",
+            "values": [
+              "216.146.46.11"
+            ]
+          }
+        },
+        {
+          "ttl": 3600,
+          "cname_record": {
+            "name": "www",
+            "value": "example.com."
+          }
+        },
+        {
+          "ttl": 86400,
+          "ns_record": {
+            "values": [
+              "ns1.p30.dynect.net.",
+              "ns2.p30.dynect.net.",
+              "ns3.p30.dynect.net.",
+              "ns4.p30.dynect.net."
+            ]
+          }
+        }
+      ],
+      "dnssec_mode": {
+        "disable": {}
+      }
+    }
+  }
+}

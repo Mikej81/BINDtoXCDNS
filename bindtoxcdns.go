@@ -44,7 +44,8 @@ func isValidDNSRecord(dnsRecord DNSRecord) bool {
 		dnsRecord.MXRecord != nil ||
 		dnsRecord.TXTRecord != nil ||
 		dnsRecord.AAAARecord != nil ||
-		dnsRecord.NSRecord != nil
+		dnsRecord.NSRecord != nil ||
+		dnsRecord.SRVRecord != nil
 }
 
 func isInt(s string) bool {
@@ -120,7 +121,7 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		var recordValueStartIndex int = -1
 
 		for i, part := range parts {
-			if strings.Contains(" NS MX A AAAA TXT CNAME ", " "+part+" ") {
+			if strings.Contains(" NS MX A AAAA TXT CNAME SRV ", " "+part+" ") {
 				recordType = part
 				recordValueStartIndex = i + 1
 				if i > 0 && isInt(parts[0]) {
@@ -142,7 +143,6 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		}
 
 		var dnsRecord DNSRecord
-		//dnsRecord.TTL = ttl
 
 		switch recordType {
 		case "A":
@@ -177,20 +177,12 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 					hostname = parts[0]
 					root = false
 				}
-				//hostname := parts[0] // Assuming the first part is always the hostname
-				//value := parts[recordValueStartIndex]
-				// dnsRecord := DNSRecord{
-				// 	TTL:      ttl,
-				// 	NSRecord: &NSRecord{Name: hostname, Values: []string{value}},
-				// }
-				//if isValidDNSRecord(dnsRecord) {
 				if root {
 					rootNSRecords = append(rootNSRecords, parts[recordValueStartIndex])
 				} else {
 					subdomainNSRecords[hostname] = append(subdomainNSRecords[hostname], parts[recordValueStartIndex])
 				}
-				//records = append(records, dnsRecord)
-				//}
+
 			}
 		case "CNAME":
 			// Parse CNAME record
@@ -205,6 +197,32 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 					records = append(records, dnsRecord)
 				}
 			}
+		case "SRV":
+			// Parse CNAME record
+			if len(parts) > recordValueStartIndex {
+				hostname := parts[0] // Assuming the first part is always the hostname
+				value := parts[recordValueStartIndex]
+				dnsRecord := DNSRecord{
+					TTL:       ttl,
+					SRVRecord: &SRVRecord{Name: hostname, Values: []string{value}},
+				}
+				if isValidDNSRecord(dnsRecord) {
+					records = append(records, dnsRecord)
+				}
+			}
+		// case "CAA":
+		// 	// Parse CAA record
+		// 	if len(parts) > recordValueStartIndex {
+		// 		hostname := parts[0] // Assuming the first part is always the hostname
+		// 		value := parts[recordValueStartIndex]
+		// 		dnsRecord := DNSRecord{
+		// 			TTL:         ttl,
+		// 			CNAMERecord: &CNAMERecord{Name: hostname, Value: value},
+		// 		}
+		// 		if isValidDNSRecord(dnsRecord) {
+		// 			records = append(records, dnsRecord)
+		// 		}
+		// 	}
 		case "TXT":
 			// Parse TXT record
 			if len(parts) > recordValueStartIndex {
@@ -315,4 +333,5 @@ func main() {
 	}
 
 	fmt.Printf("Successfully wrote JSON output to %s\n", outputFilePath)
+
 }
