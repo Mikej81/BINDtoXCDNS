@@ -1,4 +1,4 @@
-# BINDtoXCDNS
+# BIND to XC-DNS
 
 Convert BIND zone files to XC JSON
 
