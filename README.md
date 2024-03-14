@@ -2,6 +2,8 @@
 
 Convert BIND zone files to XC JSON
 
+Currently only covers NS MX A AAAA TXT CNAME.
+
 Usage
 
 ```
