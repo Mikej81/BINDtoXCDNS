@@ -22,3 +22,4 @@ go.work
 
 bind_example
 output.json
+bindtoxcdns
