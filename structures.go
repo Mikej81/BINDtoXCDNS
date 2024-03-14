@@ -63,7 +63,7 @@ type ZoneConfig struct {
 			SOAParameters     SOAParameters `json:"default_soa_parameters"` // Renamed to match the provided format
 			DefaultRRSetGroup []DNSRecord   `json:"default_rr_set_group"`
 			DNSSECMode        DNSSECMode    `json:"dnssec_mode"` // Added for DNSSEC configuration
-			//AllowHTTPLoadBalancerManagedRecords bool          `json:"allow_http_lb_managed_records"` // Added based on your format
+			//AllowHTTPLoadBalancerManagedRecords bool          `json:"allow_http_lb_managed_records"`
 		} `json:"primary"`
 	} `json:"spec"`
 }
