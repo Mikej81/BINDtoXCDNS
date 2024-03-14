@@ -9,10 +9,8 @@ import (
 	"strings"
 )
 
-// Helper function to process SOA record parts and populate SOAParameters
 func processSOA(parts []string, soaParams *SOAParameters) {
 	// Simplified example: Extract values assuming parts are in expected positions
-	// In a real scenario, more robust parsing with error checking is needed
 	soaParams.Refresh = extractSOAValue(parts[3])     // Refresh period
 	soaParams.Retry = extractSOAValue(parts[4])       // Retry period
 	soaParams.Expire = extractSOAValue(parts[5])      // Expire time
@@ -23,7 +21,6 @@ func processSOA(parts []string, soaParams *SOAParameters) {
 	soaParams.TTL = ttl
 }
 
-// Helper function to extract integer values from SOA record parts
 func extractSOAValue(part string) int {
 	// Remove non-numeric characters
 	numericPart := strings.TrimFunc(part, func(r rune) bool {
@@ -34,17 +31,22 @@ func extractSOAValue(part string) int {
 }
 
 func isValidDNSRecord(dnsRecord DNSRecord) bool {
-	// Checks if the dnsRecord is valid (not empty) based on your criteria.
-	// For example, checking that at least one record type field is non-nil.
+
+	if dnsRecord.ARecord != nil &&
+		dnsRecord.ARecord.Name != "" &&
+		!isInt(dnsRecord.ARecord.Name) &&
+		len(dnsRecord.ARecord.Values) > 0 {
+		return true
+	}
+
 	return dnsRecord.ARecord != nil ||
 		dnsRecord.CNAMERecord != nil ||
 		dnsRecord.MXRecord != nil ||
 		dnsRecord.TXTRecord != nil ||
 		dnsRecord.AAAARecord != nil ||
-		dnsRecord.NSRecord != nil // Extend this logic based on your record types
+		dnsRecord.NSRecord != nil
 }
 
-// Function to check if a string is an integer (to help identify TTLs)
 func isInt(s string) bool {
 	_, err := strconv.Atoi(s)
 	return err == nil
@@ -67,6 +69,10 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 	zoneConfig := &ZoneConfig{}
 	zoneConfig.Metadata.Labels = make(map[string]string)
 	zoneConfig.Metadata.Annotations = make(map[string]string)
+
+	// Outside the parsing loop, prepare to collect NS records
+	rootNSRecords := []string{}                     // For root-level NS records
+	subdomainNSRecords := make(map[string][]string) // For subdomain-specific NS records
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -100,9 +106,12 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		}
 
 		parts := strings.Fields(line)
-		if len(parts) < 3 {
-			fmt.Println("Warning: Skipping line due to insufficient parts:", line)
-			continue
+
+		// Should add some better logic here for APEX records.
+		if len(parts) >= 3 && isInt(parts[0]) && parts[1] == "A" {
+			// Detected an A record starting directly with a TTL (indicating missing hostname)
+			fmt.Println("Skipping A record without a hostname:", line)
+			continue // Skip this record or handle differently
 		}
 
 		var ttl int
@@ -142,10 +151,12 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 				// Assuming A records have a structure: [host] [ttl] A [value]
 				hostname := parts[0] // Assuming the first part is always the hostname
 				value := parts[recordValueStartIndex]
+
 				dnsRecord := DNSRecord{
 					TTL:     ttl,
 					ARecord: &ARecord{Name: hostname, Values: []string{value}},
 				}
+
 				if isValidDNSRecord(dnsRecord) {
 					records = append(records, dnsRecord)
 				}
@@ -153,16 +164,33 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		case "NS":
 			// Parse NS record
 			if len(parts) > recordValueStartIndex {
-				// Assuming A records have a structure: [host] [ttl] A [value]
+				var root bool
+				var hostname string
+
+				root = true
+				hostname = "@"
+
+				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) {
+					hostname = "@"
+					root = true
+				} else {
+					hostname = parts[0]
+					root = false
+				}
 				//hostname := parts[0] // Assuming the first part is always the hostname
-				value := parts[recordValueStartIndex]
-				dnsRecord := DNSRecord{
-					TTL:      ttl,
-					NSRecord: &NSRecord{Name: hostname, Values: []string{value}},
+				//value := parts[recordValueStartIndex]
+				// dnsRecord := DNSRecord{
+				// 	TTL:      ttl,
+				// 	NSRecord: &NSRecord{Name: hostname, Values: []string{value}},
+				// }
+				//if isValidDNSRecord(dnsRecord) {
+				if root {
+					rootNSRecords = append(rootNSRecords, parts[recordValueStartIndex])
+				} else {
+					subdomainNSRecords[hostname] = append(subdomainNSRecords[hostname], parts[recordValueStartIndex])
 				}
-				if isValidDNSRecord(dnsRecord) {
-					records = append(records, dnsRecord)
-				}
+				//records = append(records, dnsRecord)
+				//}
 			}
 		case "CNAME":
 			// Parse CNAME record
@@ -173,18 +201,27 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 					TTL:         ttl,
 					CNAMERecord: &CNAMERecord{Name: hostname, Value: value},
 				}
-				records = append(records, dnsRecord)
+				if isValidDNSRecord(dnsRecord) {
+					records = append(records, dnsRecord)
+				}
 			}
 		case "TXT":
 			// Parse TXT record
 			if len(parts) > recordValueStartIndex {
-				// TXT records might not have a hostname; adjust as needed
+				// TXT records might not have a hostname
+				hostname := parts[0] // Assuming the first part is always the hostname
 				value := strings.Join(parts[recordValueStartIndex:], " ")
+
+				if len(parts) >= 3 && isInt(parts[0]) && parts[1] == "TXT" {
+					hostname = ""
+				}
 				dnsRecord := DNSRecord{
 					TTL:       ttl,
-					TXTRecord: &[]string{value},
+					TXTRecord: &TXTRecord{Name: hostname, Values: []string{value}},
 				}
-				records = append(records, dnsRecord)
+				if isValidDNSRecord(dnsRecord) {
+					records = append(records, dnsRecord)
+				}
 			}
 		case "MX":
 			if len(parts) > recordValueStartIndex+1 {
@@ -206,7 +243,26 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			}
 		}
 
-		records = append(records, dnsRecord)
+		//records = append(records, dnsRecord)
+	}
+
+	// After parsing, create DNSRecord entries for the NS records
+	// I should actually just block Root Level NS since it will break...
+	if len(rootNSRecords) > 0 {
+		nsRecord := DNSRecord{
+			TTL:      86400, // Or determine TTL differently
+			NSRecord: &NSRecord{Values: rootNSRecords},
+		}
+		records = append(records, nsRecord)
+	}
+
+	for subdomain, nsValues := range subdomainNSRecords {
+		nsRecord := DNSRecord{
+			TTL:      86400,
+			NSRecord: &NSRecord{Name: subdomain, Values: nsValues},
+		}
+
+		records = append(records, nsRecord)
 	}
 
 	zoneConfig.Metadata.Name = origin

@@ -4,7 +4,7 @@ type DNSRecord struct {
 	TTL         int          `json:"ttl,omitempty"`
 	ARecord     *ARecord     `json:"a_record,omitempty"`
 	MXRecord    *[]MXValue   `json:"mx_record,omitempty"`  // Assume MXValue struct includes Name if needed
-	TXTRecord   *[]string    `json:"txt_record,omitempty"` // Adjust if a name field is needed
+	TXTRecord   *TXTRecord   `json:"txt_record,omitempty"` // Adjust if a name field is needed
 	CNAMERecord *CNAMERecord `json:"cname_record,omitempty"`
 	NSRecord    *NSRecord    `json:"ns_record,omitempty"`
 	AAAARecord  *[]string    `json:"aaaa_record,omitempty"` // Adjust similarly
@@ -32,6 +32,11 @@ type CNAMERecord struct {
 }
 
 type NSRecord struct {
+	Name   string   `json:"name,omitempty"`
+	Values []string `json:"values"`
+}
+
+type TXTRecord struct {
 	Name   string   `json:"name,omitempty"`
 	Values []string `json:"values"`
 }
