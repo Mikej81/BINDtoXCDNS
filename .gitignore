@@ -24,3 +24,4 @@ bind_example
 output.json
 bindtoxcdns
 bindtoxcdnsv2.go
+/bin

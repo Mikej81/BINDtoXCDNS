@@ -194,15 +194,6 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 					root = false
 				}
 
-				// dnsRecord := DNSRecord{
-				// 	TTL:     ttl,
-				// 	ARecord: &ARecord{Name: hostname, Values: []string{value}},
-				// }
-
-				// if isValidDNSRecord(dnsRecord) {
-				// 	records = append(records, dnsRecord)
-				// }
-
 				if root {
 					rootARecords = append(rootARecords, parts[recordValueStartIndex])
 					//aValues[lastHostname] = append(aValues[lastHostname], parts[recordValueStartIndex])
@@ -364,7 +355,6 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		// Handle the case where $ORIGIN might not be present or needed
 		fmt.Println("Notice: $ORIGIN not specified, using a default or existing zoneConfig.Metadata.Name value.")
 	}
-
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
@@ -403,5 +393,4 @@ func main() {
 	}
 
 	fmt.Printf("Successfully wrote JSON output to %s\n", outputFilePath)
-
 }
