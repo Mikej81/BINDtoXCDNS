@@ -25,3 +25,5 @@ output.json
 bindtoxcdns
 bindtoxcdnsv2.go
 /bin
+include-example.*
+compile.sh

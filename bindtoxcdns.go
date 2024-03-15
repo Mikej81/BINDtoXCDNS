@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+var processedFiles = make(map[string]bool)
 
 func processSOA(parts []string, soaParams *SOAParameters) {
 	// Simplified example: Extract values assuming parts are in expected positions
@@ -53,7 +56,35 @@ func isInt(s string) bool {
 	return err == nil
 }
 
+func processZoneBlock(zoneLines []string) (string, string, error) {
+	var zoneFilePath, domainName string
+	for _, line := range zoneLines {
+		if strings.HasPrefix(line, "zone") {
+			// Extract the domain name
+			matches := regexp.MustCompile(`zone\s+"([^"]+)"`).FindStringSubmatch(line)
+			if len(matches) > 1 {
+				domainName = matches[1]
+			}
+		} else if strings.Contains(line, "file") {
+			// Extract the file path
+			matches := regexp.MustCompile(`file\s+"([^"]+)"`).FindStringSubmatch(line)
+			if len(matches) > 1 {
+				zoneFilePath = matches[1]
+			}
+		}
+	}
+
+	return domainName, zoneFilePath, nil
+}
+
 func ParseZoneFile(filePath string) (*ZoneConfig, error) {
+
+	if processedFiles[filePath] {
+		fmt.Printf("Skipping already processed file: %s\n", filePath)
+		return nil, fmt.Errorf("file already processed: %s", filePath)
+	}
+	processedFiles[filePath] = true
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %v", err)
@@ -61,6 +92,7 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
+	var defaultTTL string
 	var lastTTL int
 	var origin string
 	var lastHostname string = "@" // Assume root by default for records without an explicit hostname
@@ -68,6 +100,9 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 	var inSOARecord bool  // Flag to indicate if we're currently processing an SOA record
 	var soaLines []string // Temporarily store SOA record lines for processing
 	var records []DNSRecord
+	var inZoneBlock bool
+	var zoneConfigLines []string
+	_ = defaultTTL
 
 	zoneConfig := &ZoneConfig{}
 	zoneConfig.Metadata.Labels = make(map[string]string)
@@ -95,6 +130,12 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			zoneConfig.Metadata.Name = origin
 			continue
 		}
+		// Special handling for $TTL
+		if strings.HasPrefix(trimmedLine, "$TTL") {
+			//defaultTTL := strings.Fields(trimmedLine)[1] // Keep defaultTTL as a string
+			// implement something to take default TTL?
+			continue
+		}
 
 		if inSOARecord || strings.Contains(trimmedLine, "SOA") {
 			soaLines = append(soaLines, trimmedLine)
@@ -109,12 +150,30 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			continue
 		}
 
+		// Handle the start and end of a zone block
+		if !inZoneBlock && strings.HasPrefix(trimmedLine, "zone \"") {
+			inZoneBlock = true
+			zoneConfigLines = []string{trimmedLine} // Start a new zone config block
+		} else if inZoneBlock {
+			zoneConfigLines = append(zoneConfigLines, trimmedLine)
+			if strings.HasSuffix(trimmedLine, "};") {
+				inZoneBlock = false // End of zone config block
+				domainName, zoneFilePath, err := processZoneBlock(zoneConfigLines)
+				if err != nil {
+					fmt.Printf("Error processing zone block: %v\n", err)
+					continue
+				}
+				// Now domainName can be used for the output filename
+				if domainName != "" && zoneFilePath != "" {
+					fmt.Printf("Processing %s from %s\n", domainName, zoneFilePath)
+
+					processIncludedZoneFile(zoneFilePath, domainName+".json")
+				}
+			}
+		}
+
 		// Main parsing logic for other record types
 		parts := strings.Fields(trimmedLine)
-		if len(parts) < 3 {
-			fmt.Println("Skipping invalid or incomplete line:", trimmedLine)
-			continue
-		}
 
 		// Detect whether the line starts with whitespace indicating continuation of previous record
 		startsWithWhitespace := line[0] == ' ' || line[0] == '\t'
@@ -126,20 +185,30 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		_ = values
 
 		// Determine if the line starts with a TTL or a hostname
-		if isInt(parts[0]) { // Line starts with TTL, indicating either continuation or root-level record
+		if isInt(parts[0]) && !inZoneBlock { // Line starts with TTL, indicating either continuation or root-level record
 			ttl, _ = strconv.Atoi(parts[0])
 			recordType = parts[1]
 			values = parts[2:]
 			if !startsWithWhitespace { // Update TTL only if it's a new record
 				lastTTL = ttl
 			}
-		} else { // Line starts with a hostname
+		} else if !isInt(parts[0]) && !inZoneBlock && len(parts) > 2 {
 			hostname = parts[0]
-			ttl, _ = strconv.Atoi(parts[1])
-			recordType = parts[2]
-			values = parts[3:]
-			lastTTL = ttl
-			lastHostname = hostname // Update the last known hostname for potential continuation
+			// Check if the hostname is actually "IN", indicating the record class, not a hostname
+			if hostname == "IN" {
+				// Adjust indices to correctly parse the line when "IN" is present
+				ttl, _ = strconv.Atoi(parts[0]) // Use the first part as TTL
+				recordType = parts[1]           // Adjust according to the actual format
+				values = parts[2:]              // The rest of the parts are values
+				hostname = ""                   // Set hostname to empty string
+			} else {
+				// Proceed as normal if the first part is a genuine hostname
+				ttl, _ = strconv.Atoi(parts[1])
+				recordType = parts[2]
+				values = parts[3:]
+				lastTTL = ttl
+				lastHostname = hostname // Update the last known hostname for potential continuation
+			}
 		}
 
 		// If the line is a continuation of the previous record, inherit the last known hostname and record type
@@ -166,10 +235,10 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			}
 		}
 
-		if recordValueStartIndex == -1 {
-			fmt.Println("Warning: Record type not identified or unsupported in line:", line)
-			continue
-		}
+		// if recordValueStartIndex == -1 {
+		// 	fmt.Println("Warning: Record type not identified or unsupported in line:", line)
+		// 	continue
+		// }
 
 		var dnsRecord DNSRecord
 
@@ -196,11 +265,7 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 
 				if root {
 					rootARecords = append(rootARecords, parts[recordValueStartIndex])
-					//aValues[lastHostname] = append(aValues[lastHostname], parts[recordValueStartIndex])
 				} else {
-					//hostname := parts[0] // Directly from parts if not whitespace-started
-					//aValues[hostname] = append(aValues[hostname], parts[recordValueStartIndex])
-					//lastHostname = hostname // Update last seen hostname
 					subdomainARecords[hostname] = append(subdomainARecords[hostname], parts[recordValueStartIndex])
 				}
 			}
@@ -213,7 +278,7 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 				root = true
 				hostname = "@"
 
-				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) {
+				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) || parts[0] == "IN" {
 					hostname = "@"
 					root = true
 				} else {
@@ -360,6 +425,30 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 	}
 
 	return zoneConfig, nil
+}
+
+func processIncludedZoneFile(zoneFilePath, outputFileName string) {
+
+	// Parse the zone file
+	zoneConfig, err := ParseZoneFile(zoneFilePath)
+	if err != nil {
+		fmt.Printf("Error parsing zone file: %v\n", err)
+		return
+	}
+
+	// Marshal the zone configuration to JSON
+	jsonBytes, err := json.MarshalIndent(zoneConfig, "", "  ")
+	if err != nil {
+		fmt.Printf("Error marshaling to JSON: %v\n", err)
+		return
+	}
+
+	// Write the JSON output to the specified file
+	err = os.WriteFile(outputFileName, jsonBytes, 0644)
+	if err != nil {
+		fmt.Printf("Error writing to output file: %v\n", err)
+		return
+	}
 }
 
 func main() {

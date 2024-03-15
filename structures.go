@@ -1,5 +1,14 @@
 package main
 
+const (
+	RecordClass_UNKNOWN = 0   // unset
+	RecordClass_IN      = 1   // the Internet
+	RecordClass_CS      = 2   // the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
+	RecordClass_CH      = 3   // the CHAOS class
+	RecordClass_HS      = 4   // Hesiod [Dyer 87]
+	RecordClass_any     = 255 // any class (spelled: *; appears only in the question section of a query; included for completeness)
+)
+
 type DNSRecord struct {
 	TTL         int          `json:"ttl,omitempty"`
 	ARecord     *ARecord     `json:"a_record,omitempty"`
