@@ -96,17 +96,18 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 	var lastTTL int
 	var origin string
 	var lastHostname string = "@" // Assume root by default for records without an explicit hostname
-	var lastRecordType string
-	var inSOARecord bool  // Flag to indicate if we're currently processing an SOA record
-	var soaLines []string // Temporarily store SOA record lines for processing
+	var lastRecordType string     // Flag for null hostnames to join into array
+	var inSOARecord bool          // Flag to indicate if we're currently processing an SOA record
+	var soaLines []string         // Temporarily store SOA record lines for processing
 	var records []DNSRecord
-	var inZoneBlock bool
+	var inZoneBlock bool // Flag to indicate we're currently processing a zone block for includes
 	var zoneConfigLines []string
-	_ = defaultTTL
+	_ = defaultTTL // shut up errors
 
 	zoneConfig := &ZoneConfig{}
 	zoneConfig.Metadata.Labels = make(map[string]string)
 	zoneConfig.Metadata.Annotations = make(map[string]string)
+	zoneConfig.Metadata.Description = "Zone Converted from BIND Zone File by MC Tool"
 
 	// Outside the parsing loop, prepare to collect NS / A records
 	rootNSRecords := []string{}                     // For root-level NS records
