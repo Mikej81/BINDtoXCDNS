@@ -242,9 +242,6 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 
 		var dnsRecord DNSRecord
 
-		//for _, line := range lines { // Assuming 'lines' is each line of your zone file
-		// Your existing line parsing logic here...
-
 		switch recordType {
 		case "A":
 			// Parse A record
