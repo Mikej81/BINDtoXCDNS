@@ -2,7 +2,7 @@
 
 Convert BIND zone files to XC JSON
 
-Currently only covers NS MX A AAAA TXT CNAME.
+Currently only covers NS MX A AAAA TXT CNAME SRV
 
 Usage
 
