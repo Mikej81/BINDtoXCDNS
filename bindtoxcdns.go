@@ -61,64 +61,93 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	var records []DNSRecord
 	var lastTTL int
 	var origin string
+	var lastHostname string = "@" // Assume root by default for records without an explicit hostname
+	var lastRecordType string
 	var inSOARecord bool  // Flag to indicate if we're currently processing an SOA record
 	var soaLines []string // Temporarily store SOA record lines for processing
+	var records []DNSRecord
 
 	zoneConfig := &ZoneConfig{}
 	zoneConfig.Metadata.Labels = make(map[string]string)
 	zoneConfig.Metadata.Annotations = make(map[string]string)
 
-	// Outside the parsing loop, prepare to collect NS records
+	// Outside the parsing loop, prepare to collect NS / A records
 	rootNSRecords := []string{}                     // For root-level NS records
 	subdomainNSRecords := make(map[string][]string) // For subdomain-specific NS records
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	rootARecords := []string{}                     // For accumulating A record values by hostname
+	subdomainARecords := make(map[string][]string) // For accumulating A record values by hostname
 
-		if line == "" || strings.HasPrefix(line, ";") {
+	for scanner.Scan() {
+		line := scanner.Text() // Use the original line with leading spaces for whitespace detection
+		trimmedLine := strings.TrimSpace(line)
+
+		// Skip comments
+		if trimmedLine == "" || strings.HasPrefix(trimmedLine, ";") {
 			continue
 		}
 
-		if strings.HasPrefix(line, "$ORIGIN") {
-			origin = strings.Fields(line)[1]
+		// Special handling for $ORIGIN
+		if strings.HasPrefix(trimmedLine, "$ORIGIN") {
+			origin = strings.Fields(trimmedLine)[1]
 			zoneConfig.Metadata.Name = origin
 			continue
 		}
 
-		// Check if we're starting an SOA record
-		if strings.Contains(line, "SOA") {
-			inSOARecord = true
-			soaLines = append(soaLines, line) // Add the first line of the SOA record
-			continue
-		}
-
-		if inSOARecord {
-			soaLines = append(soaLines, line)
+		if inSOARecord || strings.Contains(trimmedLine, "SOA") {
+			soaLines = append(soaLines, trimmedLine)
 			// Check if this is the last line of the SOA record
 			if strings.Contains(line, ")") {
 				inSOARecord = false // We've reached the end of the SOA record
 				processSOA(soaLines, &zoneConfig.Spec.Primary.SOAParameters)
 				soaLines = []string{} // Reset for safety
+			} else {
+				inSOARecord = true // Continue collecting SOA lines
 			}
 			continue
 		}
 
-		parts := strings.Fields(line)
-
-		// Should add some better logic here for APEX records.
-		if len(parts) >= 3 && isInt(parts[0]) && parts[1] == "A" {
-			// Detected an A record starting directly with a TTL (indicating missing hostname)
-			fmt.Println("Skipping A record without a hostname:", line)
-			continue // Skip this record or handle differently
+		// Main parsing logic for other record types
+		parts := strings.Fields(trimmedLine)
+		if len(parts) < 3 {
+			fmt.Println("Skipping invalid or incomplete line:", trimmedLine)
+			continue
 		}
 
+		// Detect whether the line starts with whitespace indicating continuation of previous record
+		startsWithWhitespace := line[0] == ' ' || line[0] == '\t'
+
 		var ttl int
-		var recordType string
-		var hostname string
+		var hostname, recordType string
+		var values []string
 		var recordValueStartIndex int = -1
+		_ = values
+
+		// Determine if the line starts with a TTL or a hostname
+		if isInt(parts[0]) { // Line starts with TTL, indicating either continuation or root-level record
+			ttl, _ = strconv.Atoi(parts[0])
+			recordType = parts[1]
+			values = parts[2:]
+			if !startsWithWhitespace { // Update TTL only if it's a new record
+				lastTTL = ttl
+			}
+		} else { // Line starts with a hostname
+			hostname = parts[0]
+			ttl, _ = strconv.Atoi(parts[1])
+			recordType = parts[2]
+			values = parts[3:]
+			lastTTL = ttl
+			lastHostname = hostname // Update the last known hostname for potential continuation
+		}
+
+		// If the line is a continuation of the previous record, inherit the last known hostname and record type
+		if startsWithWhitespace && lastRecordType == recordType {
+			hostname = lastHostname
+		} else {
+			lastRecordType = recordType // Update the last known record type
+		}
 
 		for i, part := range parts {
 			if strings.Contains(" NS MX A AAAA TXT CNAME SRV ", " "+part+" ") {
@@ -144,21 +173,44 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 
 		var dnsRecord DNSRecord
 
+		//for _, line := range lines { // Assuming 'lines' is each line of your zone file
+		// Your existing line parsing logic here...
+
 		switch recordType {
 		case "A":
 			// Parse A record
 			if len(parts) > recordValueStartIndex {
-				// Assuming A records have a structure: [host] [ttl] A [value]
-				hostname := parts[0] // Assuming the first part is always the hostname
-				value := parts[recordValueStartIndex]
+				var root bool
+				var hostname string
 
-				dnsRecord := DNSRecord{
-					TTL:     ttl,
-					ARecord: &ARecord{Name: hostname, Values: []string{value}},
+				root = true
+				hostname = "@"
+
+				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) {
+					hostname = "@"
+					root = true
+				} else {
+					hostname = parts[0]
+					root = false
 				}
 
-				if isValidDNSRecord(dnsRecord) {
-					records = append(records, dnsRecord)
+				// dnsRecord := DNSRecord{
+				// 	TTL:     ttl,
+				// 	ARecord: &ARecord{Name: hostname, Values: []string{value}},
+				// }
+
+				// if isValidDNSRecord(dnsRecord) {
+				// 	records = append(records, dnsRecord)
+				// }
+
+				if root {
+					rootARecords = append(rootARecords, parts[recordValueStartIndex])
+					//aValues[lastHostname] = append(aValues[lastHostname], parts[recordValueStartIndex])
+				} else {
+					//hostname := parts[0] // Directly from parts if not whitespace-started
+					//aValues[hostname] = append(aValues[hostname], parts[recordValueStartIndex])
+					//lastHostname = hostname // Update last seen hostname
+					subdomainARecords[hostname] = append(subdomainARecords[hostname], parts[recordValueStartIndex])
 				}
 			}
 		case "NS":
@@ -177,6 +229,7 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 					hostname = parts[0]
 					root = false
 				}
+
 				if root {
 					rootNSRecords = append(rootNSRecords, parts[recordValueStartIndex])
 				} else {
@@ -261,7 +314,7 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			}
 		}
 
-		//records = append(records, dnsRecord)
+		//}
 	}
 
 	// After parsing, create DNSRecord entries for the NS records
@@ -281,6 +334,23 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		}
 
 		records = append(records, nsRecord)
+	}
+
+	if len(rootARecords) > 0 {
+		aRecord := DNSRecord{
+			TTL:      86400, // Or determine TTL differently
+			NSRecord: &NSRecord{Values: rootARecords},
+		}
+		records = append(records, aRecord)
+	}
+
+	// After parsing, create DNSRecord entries for the A records similarly to NS records
+	for hostname, values := range subdomainARecords {
+		aRecord := DNSRecord{
+			TTL:     60,
+			ARecord: &ARecord{Name: hostname, Values: values},
+		}
+		records = append(records, aRecord)
 	}
 
 	zoneConfig.Metadata.Name = origin
