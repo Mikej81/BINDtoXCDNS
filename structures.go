@@ -38,8 +38,13 @@ type ARecord struct {
 }
 
 type SRVRecord struct {
-	Name   string   `json:"name,omitempty"`
-	Values []string `json:"values"`
+	Name   string `json:"name"`
+	Values []struct {
+		Priority int    `json:"priority"`
+		Weight   int    `json:"weight"`
+		Port     int    `json:"port"`
+		Target   string `json:"target"`
+	} `json:"values"`
 }
 
 type CNAMERecord struct {

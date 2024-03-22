@@ -79,7 +79,7 @@ func processZoneBlock(zoneLines []string) (string, string, error) {
 	return domainName, zoneFilePath, nil
 }
 
-func processIncludeDirective(filePath, includeOrigin string, rootPath string, zoneConfig *ZoneConfig) ([]DNSRecord, error) {
+func processIncludeDirective(filePath, includeOrigin string, rootPath string) ([]DNSRecord, error) {
 
 	includedRecords, _, err := ParseZoneFile(filePath, includeOrigin, true, rootPath)
 	if err != nil {
@@ -414,17 +414,44 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 				}
 			}
 		case "SRV":
-			// Parse CNAME record
-			if len(parts) > recordValueStartIndex {
-				//hostname := parts[0] // Assuming the first part is always the hostname
-				value := parts[recordValueStartIndex]
-				dnsRecord := DNSRecord{
-					TTL:       ttl,
-					SRVRecord: &SRVRecord{Name: hostname, Values: []string{value}},
+			if len(parts) >= 6 {
+				priority, errPri := strconv.Atoi(parts[3])
+				weight, errWei := strconv.Atoi(parts[4])
+				port, errPort := strconv.Atoi(parts[5])
+				target := parts[6]
+
+				if errPri != nil || errWei != nil || errPort != nil {
+					// Handle errors, maybe log them or print an error message
+					continue // Skip this record if there's an error
 				}
-				if isValidDNSRecord(dnsRecord) {
-					records = append(records, dnsRecord)
+
+				srvValue := struct {
+					Priority int    `json:"priority"`
+					Weight   int    `json:"weight"`
+					Port     int    `json:"port"`
+					Target   string `json:"target"`
+				}{
+					Priority: priority,
+					Weight:   weight,
+					Port:     port,
+					Target:   target,
 				}
+
+				// Append this SRV record to your DNS records slice
+				records = append(records, DNSRecord{
+					TTL: ttl, // make sure ttl is parsed correctly from the line
+					SRVRecord: &SRVRecord{
+						Name: hostname,
+						Values: []struct {
+							Priority int    `json:"priority"`
+							Weight   int    `json:"weight"`
+							Port     int    `json:"port"`
+							Target   string `json:"target"`
+						}{srvValue},
+					},
+				})
+			} else {
+				// Handle the case where there aren't enough parts to parse an SRV record
 			}
 		// case "CAA":
 		// 	// Parse CAA record
@@ -443,7 +470,6 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 			// Parse TXT record
 			if len(parts) > recordValueStartIndex {
 				// TXT records might not have a hostname
-				//hostname := parts[0] // Assuming the first part is always the hostname
 				value := strings.Join(parts[recordValueStartIndex:], " ")
 
 				if len(parts) >= 3 && parts[0] == "" || isInt(parts[0]) || parts[0] == "IN" && parts[1] == "TXT" {
@@ -470,10 +496,8 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 		case "AAAA":
 			if len(parts) > recordValueStartIndex {
 				var root bool
-				//var hostname string
 
 				root = true
-				//hostname = "@"
 
 				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) {
 					hostname = "@"
@@ -502,7 +526,7 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 					includeOrigin = parts[2] // Override with specific origin if provided
 				}
 
-				includedRecords, err := processIncludeDirective(includeFilePath, includeOrigin, bindFileRootPath, zoneConfig)
+				includedRecords, err := processIncludeDirective(includeFilePath, includeOrigin, bindFileRootPath)
 				if err != nil {
 					fmt.Printf("Error processing $INCLUDE %s: %v\n", includeFilePath, err)
 				}
