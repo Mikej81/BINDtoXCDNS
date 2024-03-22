@@ -16,8 +16,14 @@ var processedFiles = make(map[string]bool)
 
 func processSOA(parts []string, soaParams *SOAParameters) {
 	// Simplified example: Extract values assuming parts are in expected positions
-	soaParams.Refresh = extractSOAValue(parts[3])     // Refresh period
-	soaParams.Retry = extractSOAValue(parts[4])       // Retry period
+	soaParams.Refresh = extractSOAValue(parts[3]) // Refresh period
+	if soaParams.Refresh < 3600 {
+		soaParams.Refresh = 3600
+	}
+	soaParams.Retry = extractSOAValue(parts[4]) // Retry period
+	if soaParams.Retry < 60 {
+		soaParams.Retry = 60
+	}
 	soaParams.Expire = extractSOAValue(parts[5])      // Expire time
 	soaParams.NegativeTTL = extractSOAValue(parts[6]) // Minimum TTL
 
