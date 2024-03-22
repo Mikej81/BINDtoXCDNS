@@ -18,10 +18,10 @@ bindtoxcdns -input /path/to/bind/file -output /path/to/output/json [optional fla
 
 ### Flags
 
--input (required): Specifies the path to the BIND zone file you wish to convert.
--output (required): Specifies the path where the resulting XC DNS JSON file should be saved.
--root (optional): Sets the root directory path for any relative file paths encountered in $INCLUDE directives within the BIND zone file. This is useful when your BIND configuration is spread across multiple files.
--origin (optional): Overrides the $ORIGIN directive found in the BIND zone file. Use this if you need to specify a different domain name than the one defined in the zone file.
+- input (required): Specifies the path to the BIND zone file you wish to convert.
+- output (required): Specifies the path where the resulting XC DNS JSON file should be saved.
+- root (optional): Sets the root directory path for any relative file paths encountered in $INCLUDE directives within the BIND zone file. This is useful when your BIND configuration is spread across multiple files.
+- origin (optional): Overrides the $ORIGIN directive found in the BIND zone file. Use this if you need to specify a different domain name than the one defined in the zone file.
 
 ## Examples
 
