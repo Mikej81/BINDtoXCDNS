@@ -4,9 +4,9 @@ This tool is designed to convert BIND zone files into the XC JSON format, making
 
 ## Features
 
-Converts BIND zone file records (NS, MX, A, AAAA, TXT, CNAME, SRV) into XC DNS JSON format.
-Allows specifying a root path for zone files, useful for $INCLUDE directives in BIND files.
-Provides an option to override the $ORIGIN directive with a custom domain name.
+- Converts BIND zone file records (NS, MX, A, AAAA, TXT, CNAME, SRV) into XC DNS JSON format.
+- Allows specifying a root path for zone files, useful for $INCLUDE directives in BIND files.
+- Provides an option to override the $ORIGIN directive with a custom domain name.
 
 ## Usage
 
