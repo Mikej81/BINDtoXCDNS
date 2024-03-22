@@ -437,7 +437,7 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 					Target:   target,
 				}
 
-				// Append this SRV record to your DNS records slice
+				// Append this SRV record to DNS records slice
 				records = append(records, DNSRecord{
 					TTL: ttl, // make sure ttl is parsed correctly from the line
 					SRVRecord: &SRVRecord{
