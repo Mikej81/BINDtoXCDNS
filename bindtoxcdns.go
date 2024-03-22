@@ -222,26 +222,6 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 
 		}
 
-		// if strings.HasPrefix(trimmedLine, "$INCLUDE") {
-		// 	parts := strings.Fields(trimmedLine)
-		// 	if len(parts) >= 2 {
-		// 		includeFilePath := filepath.Join(fileDir, parts[1]) // Construct the full path of the included file
-		// 		//includeFilePath := fileDir
-		// 		includeOrigin = origin // Default to using the current origin if not specified in $INCLUDE
-
-		// 		if len(parts) >= 3 {
-		// 			includeOrigin = parts[2] // Override with specific origin if provided
-		// 		}
-		// 		fmt.Printf("Processing $INCLUDE: %v\n", includeOrigin)
-
-		// 		err := processIncludeDirective(includeFilePath, includeOrigin, bindFileRootPath, zoneConfig)
-		// 		if err != nil {
-		// 			fmt.Printf("Error processing $INCLUDE %s: %v\n", includeFilePath, err)
-		// 		}
-		// 	}
-		// 	continue
-		// }
-
 		// Handle the start and end of a zone block
 		if !inZoneBlock && strings.HasPrefix(trimmedLine, "zone \"") {
 			inZoneBlock = true
