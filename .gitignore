@@ -27,3 +27,4 @@ bindtoxcdnsv2.go
 /bin
 include-example.*
 compile.sh
+/test

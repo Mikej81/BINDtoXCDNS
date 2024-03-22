@@ -18,7 +18,7 @@ type DNSRecord struct {
 	CNAMERecord *CNAMERecord `json:"cname_record,omitempty"`
 	CAARecord   *CAARecord   `json:"caa_record,omitempty"`
 	NSRecord    *NSRecord    `json:"ns_record,omitempty"`
-	AAAARecord  *[]string    `json:"aaaa_record,omitempty"` // Adjust similarly
+	AAAARecord  *AAAARecord  `json:"aaaa_record,omitempty"` // Adjust similarly
 }
 
 // MXValue struct represents an individual MX record's priority and value.

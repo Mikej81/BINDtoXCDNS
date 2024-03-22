@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -77,17 +79,70 @@ func processZoneBlock(zoneLines []string) (string, string, error) {
 	return domainName, zoneFilePath, nil
 }
 
-func ParseZoneFile(filePath string) (*ZoneConfig, error) {
+func processIncludeDirective(filePath, includeOrigin string, rootPath string, zoneConfig *ZoneConfig) ([]DNSRecord, error) {
 
-	if processedFiles[filePath] {
-		fmt.Printf("Skipping already processed file: %s\n", filePath)
-		return nil, fmt.Errorf("file already processed: %s", filePath)
+	includedRecords, _, err := ParseZoneFile(filePath, includeOrigin, true, rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("[processIncludeDirective] error processing $INCLUDE %s: %v", filePath, err)
 	}
-	processedFiles[filePath] = true
+	//fmt.Println(includedRecords)
+
+	// Append the records from the included file directly to zoneConfig's records.
+	//fmt.Printf("Current record count: %d\n", len(zoneConfig.Spec.Primary.DefaultRRSetGroup))
+
+	// if zoneConfig.Spec.Primary.DefaultRRSetGroup == nil {
+	// 	//zoneConfig.Spec.Primary.DefaultRRSetGroup = []DNSRecord{} // Initialize the slice if it's nil
+	// 	zoneConfig.Spec.Primary.DefaultRRSetGroup = includedRecords
+	// 	//fmt.Println("No records, setting...")
+	// } else {
+	// 	//fmt.Println("Records, appending...")
+	// 	zoneConfig.Spec.Primary.DefaultRRSetGroup = append(zoneConfig.Spec.Primary.DefaultRRSetGroup, includedRecords...)
+	// }
+
+	return includedRecords, nil
+}
+
+func processIncludedZoneFile(zoneFilePath, outputFileName string, customOrigin string) {
+
+	// Parse the zone file
+	_, zoneConfig, err := ParseZoneFile(zoneFilePath, customOrigin, false, "")
+	if err != nil {
+		fmt.Printf("Error parsing zone file: %v\n", err)
+		return
+	}
+
+	// Marshal the zone configuration to JSON
+	jsonBytes, err := json.MarshalIndent(zoneConfig, "", "  ")
+	if err != nil {
+		fmt.Printf("Error marshaling to JSON: %v\n", err)
+		return
+	}
+
+	// Write the JSON output to the specified file
+	err = os.WriteFile(outputFileName, jsonBytes, 0644)
+	if err != nil {
+		fmt.Printf("Error writing to output file: %v\n", err)
+		return
+	}
+}
+
+func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindFileRootPath string) ([]DNSRecord, *ZoneConfig, error) {
+
+	fileDir := filepath.Clean(bindFileRootPath)
+
+	//fmt.Println("Using root zone file directory:", fileDir)
+
+	if !onlyRecords {
+		if processedFiles[filePath] {
+			fmt.Printf("Skipping already processed file: %s\n", filePath)
+			return nil, nil, fmt.Errorf("file already processed: %s", filePath)
+		}
+		processedFiles[filePath] = true
+	}
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open file: %v", err)
+		return nil, nil, fmt.Errorf("failed to open file: %v", err)
 	}
 	defer file.Close()
 
@@ -95,6 +150,8 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 	var defaultTTL string
 	var lastTTL int
 	var origin string
+	var originalOrigin string
+	var includeOrigin string
 	var lastHostname string = "@" // Assume root by default for records without an explicit hostname
 	var lastRecordType string     // Flag for null hostnames to join into array
 	var inSOARecord bool          // Flag to indicate if we're currently processing an SOA record
@@ -104,10 +161,20 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 	var zoneConfigLines []string
 	_ = defaultTTL // shut up errors
 
-	zoneConfig := &ZoneConfig{}
-	zoneConfig.Metadata.Labels = make(map[string]string)
-	zoneConfig.Metadata.Annotations = make(map[string]string)
-	zoneConfig.Metadata.Description = "Zone Converted from BIND Zone File by MC Tool"
+	var zoneConfig *ZoneConfig
+
+	if zoneConfig == nil {
+		zoneConfig = &ZoneConfig{}
+		zoneConfig.Metadata.Labels = make(map[string]string)
+		zoneConfig.Metadata.Annotations = make(map[string]string)
+		zoneConfig.Metadata.Description = "Zone Converted from BIND Zone File by MC Tool"
+
+	}
+
+	// Set origin to customOrigin if provided, otherwise, initialize as empty
+	// This allows overriding $ORIGIN found in the file or providing one if missing
+	origin = customOrigin
+	includeOrigin = customOrigin
 
 	// Outside the parsing loop, prepare to collect NS / A records
 	rootNSRecords := []string{}                     // For root-level NS records
@@ -115,6 +182,9 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 
 	rootARecords := []string{}                     // For accumulating A record values by hostname
 	subdomainARecords := make(map[string][]string) // For accumulating A record values by hostname
+
+	rootAAAARecords := []string{}                     // For accumulating AAAA record values by hostname
+	subdomainAAAARecords := make(map[string][]string) // For accumulating AAAA record values by hostname
 
 	for scanner.Scan() {
 		line := scanner.Text() // Use the original line with leading spaces for whitespace detection
@@ -124,32 +194,66 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		if trimmedLine == "" || strings.HasPrefix(trimmedLine, ";") {
 			continue
 		}
+		if !onlyRecords {
+			// Handle $ORIGIN directive within the file only if customOrigin is not provided
+			if strings.HasPrefix(trimmedLine, "$ORIGIN") && origin == "" {
+				originalOrigin = strings.Fields(trimmedLine)[1]
+				if origin == "" {
+					zoneConfig.Metadata.Name = originalOrigin
+				} else {
+					zoneConfig.Metadata.Name = origin
+				}
 
-		// Special handling for $ORIGIN
-		if strings.HasPrefix(trimmedLine, "$ORIGIN") {
-			origin = strings.Fields(trimmedLine)[1]
-			zoneConfig.Metadata.Name = origin
-			continue
-		}
-		// Special handling for $TTL
-		if strings.HasPrefix(trimmedLine, "$TTL") {
-			//defaultTTL := strings.Fields(trimmedLine)[1] // Keep defaultTTL as a string
-			// implement something to take default TTL?
-			continue
-		}
-
-		if inSOARecord || strings.Contains(trimmedLine, "SOA") {
-			soaLines = append(soaLines, trimmedLine)
-			// Check if this is the last line of the SOA record
-			if strings.Contains(line, ")") {
-				inSOARecord = false // We've reached the end of the SOA record
-				processSOA(soaLines, &zoneConfig.Spec.Primary.SOAParameters)
-				soaLines = []string{} // Reset for safety
-			} else {
-				inSOARecord = true // Continue collecting SOA lines
+				continue
 			}
-			continue
+
+			// Use customOrigin as the default if no $ORIGIN directive was found in the file
+			if origin == "" {
+				// Since customOrigin is also "", no origin has been specified or detected
+				return nil, nil, fmt.Errorf("no $ORIGIN specified and none detected in the file")
+			}
+
+			// Special handling for $TTL
+			if strings.HasPrefix(trimmedLine, "$TTL") {
+				//defaultTTL := strings.Fields(trimmedLine)[1] // Keep defaultTTL as a string
+				// implement something to take default TTL?
+				continue
+			}
+
+			if inSOARecord || strings.Contains(trimmedLine, "SOA") {
+				soaLines = append(soaLines, trimmedLine)
+				// Check if this is the last line of the SOA record
+				if strings.Contains(line, ")") {
+					inSOARecord = false // We've reached the end of the SOA record
+					processSOA(soaLines, &zoneConfig.Spec.Primary.SOAParameters)
+					soaLines = []string{} // Reset for safety
+				} else {
+					inSOARecord = true // Continue collecting SOA lines
+				}
+				continue
+			}
+
 		}
+
+		// if strings.HasPrefix(trimmedLine, "$INCLUDE") {
+		// 	parts := strings.Fields(trimmedLine)
+		// 	if len(parts) >= 2 {
+		// 		includeFilePath := filepath.Join(fileDir, parts[1]) // Construct the full path of the included file
+		// 		//includeFilePath := fileDir
+		// 		includeOrigin = origin // Default to using the current origin if not specified in $INCLUDE
+
+		// 		if len(parts) >= 3 {
+		// 			includeOrigin = parts[2] // Override with specific origin if provided
+		// 		}
+		// 		fmt.Printf("Processing $INCLUDE: %v\n", includeOrigin)
+
+		// 		err := processIncludeDirective(includeFilePath, includeOrigin, bindFileRootPath, zoneConfig)
+		// 		if err != nil {
+		// 			fmt.Printf("Error processing $INCLUDE %s: %v\n", includeFilePath, err)
+		// 		}
+		// 	}
+		// 	continue
+		// }
 
 		// Handle the start and end of a zone block
 		if !inZoneBlock && strings.HasPrefix(trimmedLine, "zone \"") {
@@ -168,7 +272,7 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 				if domainName != "" && zoneFilePath != "" {
 					fmt.Printf("Processing %s from %s\n", domainName, zoneFilePath)
 
-					processIncludedZoneFile(zoneFilePath, domainName+".json")
+					processIncludedZoneFile(zoneFilePath, domainName+".json", origin)
 				}
 			}
 		}
@@ -236,10 +340,24 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			}
 		}
 
-		// if recordValueStartIndex == -1 {
-		// 	fmt.Println("Warning: Record type not identified or unsupported in line:", line)
-		// 	continue
-		// }
+		// Adjust hostname based on includeOrigin if processing records only
+		if onlyRecords && includeOrigin != "" {
+			if hostname == "@" {
+				// If the hostname is '@', replace it with the includeOrigin
+				hostname = includeOrigin
+				//fmt.Printf("onlyrecords host: %s\n", hostname)
+			} else if hostname != "" {
+				// Prepend includeOrigin to non-root hostnames, separated by a period if not empty
+				hostname = hostname + "." + includeOrigin
+				//fmt.Printf("onlyrecords host: %s\n", hostname)
+			}
+			// If hostname is empty or '@', but includeOrigin is not, use includeOrigin directly
+			if hostname == "@" || hostname == "" {
+				hostname = includeOrigin
+				//fmt.Printf("onlyrecords host: %s\n", hostname)
+			}
+		}
+		//fmt.Printf("OnlyRecords: %s, includeOrigin: %s\n", onlyRecords, includeOrigin)
 
 		var dnsRecord DNSRecord
 
@@ -248,16 +366,19 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			// Parse A record
 			if len(parts) > recordValueStartIndex {
 				var root bool
-				var hostname string
+				//var hostname string
 
 				root = true
-				hostname = "@"
+				//hostname = "@"
 
-				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) {
+				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) || parts[0] == "IN" {
 					hostname = "@"
 					root = true
 				} else {
-					hostname = parts[0]
+					if hostname == "" {
+						hostname = parts[0]
+					}
+
 					root = false
 				}
 
@@ -271,10 +392,9 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			// Parse NS record
 			if len(parts) > recordValueStartIndex {
 				var root bool
-				var hostname string
+				//var hostname string
 
 				root = true
-				hostname = "@"
 
 				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) || parts[0] == "IN" {
 					hostname = "@"
@@ -294,7 +414,9 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		case "CNAME":
 			// Parse CNAME record
 			if len(parts) > recordValueStartIndex {
-				hostname := parts[0] // Assuming the first part is always the hostname
+				if hostname == "" {
+					hostname = parts[0]
+				} // Assuming the first part is always the hostname
 				value := parts[recordValueStartIndex]
 				dnsRecord := DNSRecord{
 					TTL:         ttl,
@@ -307,7 +429,7 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		case "SRV":
 			// Parse CNAME record
 			if len(parts) > recordValueStartIndex {
-				hostname := parts[0] // Assuming the first part is always the hostname
+				//hostname := parts[0] // Assuming the first part is always the hostname
 				value := parts[recordValueStartIndex]
 				dnsRecord := DNSRecord{
 					TTL:       ttl,
@@ -334,10 +456,10 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			// Parse TXT record
 			if len(parts) > recordValueStartIndex {
 				// TXT records might not have a hostname
-				hostname := parts[0] // Assuming the first part is always the hostname
+				//hostname := parts[0] // Assuming the first part is always the hostname
 				value := strings.Join(parts[recordValueStartIndex:], " ")
 
-				if len(parts) >= 3 && isInt(parts[0]) && parts[1] == "TXT" {
+				if len(parts) >= 3 && parts[0] == "" || isInt(parts[0]) || parts[0] == "IN" && parts[1] == "TXT" {
 					hostname = ""
 				}
 				dnsRecord := DNSRecord{
@@ -360,15 +482,50 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			}
 		case "AAAA":
 			if len(parts) > recordValueStartIndex {
-				ipv6Address := parts[recordValueStartIndex]
-				dnsRecord.AAAARecord = &[]string{ipv6Address} // Assuming AAAARecord is similarly structured to ARecord
-				if hostname != "" {
-					// If there's a specific way to handle hostname for AAAA records, do it here
+				var root bool
+				//var hostname string
+
+				root = true
+				//hostname = "@"
+
+				if parts[0] == "@" || parts[0] == "" || isInt(parts[0]) {
+					hostname = "@"
+					root = true
+				} else {
+					hostname = parts[0]
+					root = false
+				}
+
+				if root {
+					rootAAAARecords = append(rootAAAARecords, parts[recordValueStartIndex])
+				} else {
+					subdomainAAAARecords[hostname] = append(subdomainAAAARecords[hostname], parts[recordValueStartIndex])
 				}
 			}
 		}
 
-		//}
+		if strings.HasPrefix(trimmedLine, "$INCLUDE") {
+			parts := strings.Fields(trimmedLine)
+			if len(parts) >= 2 {
+				includeFilePath := filepath.Join(fileDir, parts[1]) // Construct the full path of the included file
+				//includeFilePath := fileDir
+				includeOrigin = origin // Default to using the current origin if not specified in $INCLUDE
+
+				if len(parts) >= 3 {
+					includeOrigin = parts[2] // Override with specific origin if provided
+				}
+				fmt.Printf("Processing $INCLUDE: %v\n", includeOrigin)
+
+				includedRecords, err := processIncludeDirective(includeFilePath, includeOrigin, bindFileRootPath, zoneConfig)
+				if err != nil {
+					fmt.Printf("Error processing $INCLUDE %s: %v\n", includeFilePath, err)
+				}
+
+				records = append(records, includedRecords...)
+
+			}
+			continue
+		}
 	}
 
 	// After parsing, create DNSRecord entries for the NS records
@@ -392,8 +549,8 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 
 	if len(rootARecords) > 0 {
 		aRecord := DNSRecord{
-			TTL:      86400, // Or determine TTL differently
-			NSRecord: &NSRecord{Values: rootARecords},
+			TTL:     86400, // Or determine TTL differently
+			ARecord: &ARecord{Values: rootARecords},
 		}
 		records = append(records, aRecord)
 	}
@@ -405,6 +562,22 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 			ARecord: &ARecord{Name: hostname, Values: values},
 		}
 		records = append(records, aRecord)
+	}
+
+	if len(rootAAAARecords) > 0 {
+		aaaaRecord := DNSRecord{
+			TTL:        60,
+			AAAARecord: &AAAARecord{Values: rootAAAARecords},
+		}
+		records = append(records, aaaaRecord)
+	}
+
+	for hostname, values := range subdomainAAAARecords {
+		aaaaRecord := DNSRecord{
+			TTL:        60,
+			AAAARecord: &AAAARecord{Name: hostname, Values: values},
+		}
+		records = append(records, aaaaRecord)
 	}
 
 	zoneConfig.Metadata.Name = origin
@@ -419,47 +592,49 @@ func ParseZoneFile(filePath string) (*ZoneConfig, error) {
 		fmt.Println("Notice: $ORIGIN not specified, using a default or existing zoneConfig.Metadata.Name value.")
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return zoneConfig, nil
-}
-
-func processIncludedZoneFile(zoneFilePath, outputFileName string) {
-
-	// Parse the zone file
-	zoneConfig, err := ParseZoneFile(zoneFilePath)
-	if err != nil {
-		fmt.Printf("Error parsing zone file: %v\n", err)
-		return
-	}
-
-	// Marshal the zone configuration to JSON
-	jsonBytes, err := json.MarshalIndent(zoneConfig, "", "  ")
-	if err != nil {
-		fmt.Printf("Error marshaling to JSON: %v\n", err)
-		return
-	}
-
-	// Write the JSON output to the specified file
-	err = os.WriteFile(outputFileName, jsonBytes, 0644)
-	if err != nil {
-		fmt.Printf("Error writing to output file: %v\n", err)
-		return
+	// Return based on the onlyRecords flag.
+	if onlyRecords {
+		return records, nil, nil // Return only records and no error.
+	} else {
+		return nil, zoneConfig, nil // Return the full ZoneConfig and no error.
 	}
 }
-
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: program <input_zone_file> <output_json_file>")
+
+	// Define command-line flags
+	inputFilePath := flag.String("input", "", "Path to the input zone file")
+	outputFilePath := flag.String("output", "", "Path to the output JSON file")
+	bindFileRootPath := flag.String("root", ".", "BIND file root path for resolving file references")
+	customOrigin := flag.String("origin", "", "Optional origin to override $ORIGIN in the zone file")
+
+	// Parse the command-line flags
+	flag.Parse()
+
+	// Check required arguments (input and output paths must be provided)
+	if *inputFilePath == "" || *outputFilePath == "" {
+		fmt.Println("Usage: program -input <input_zone_file> -output <output_json_file> [-root <bind_file_root_path>] [-origin <optional_origin>]")
+		flag.PrintDefaults()
 		return
 	}
 
-	inputFilePath := os.Args[1]
-	outputFilePath := os.Args[2]
+	fullPath := *bindFileRootPath
 
-	// Parse the zone file
-	zoneConfig, err := ParseZoneFile(inputFilePath)
+	// Check if the path starts with "./"
+	if strings.HasPrefix(fullPath, "./") {
+		// Convert to an absolute path. Note the use of = instead of :=
+		var err error
+		fullPath, err = filepath.Abs(fullPath)
+		if err != nil {
+			fmt.Printf("Error getting absolute path: %v\n", err)
+			return // Make sure to return or handle the error appropriately
+		}
+	}
+
+	// Parse the zone file with the optional origin and BIND file root path
+	_, zoneConfig, err := ParseZoneFile(*inputFilePath, *customOrigin, false, fullPath)
 	if err != nil {
 		fmt.Printf("Error parsing zone file: %v\n", err)
 		return
@@ -473,11 +648,11 @@ func main() {
 	}
 
 	// Write the JSON output to the specified file
-	err = os.WriteFile(outputFilePath, jsonBytes, 0644)
+	err = os.WriteFile(*outputFilePath, jsonBytes, 0644)
 	if err != nil {
 		fmt.Printf("Error writing to output file: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Successfully wrote JSON output to %s\n", outputFilePath)
+	fmt.Printf("Successfully wrote JSON output to %s\n", *outputFilePath)
 }
