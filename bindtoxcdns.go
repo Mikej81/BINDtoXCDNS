@@ -85,19 +85,6 @@ func processIncludeDirective(filePath, includeOrigin string, rootPath string, zo
 	if err != nil {
 		return nil, fmt.Errorf("[processIncludeDirective] error processing $INCLUDE %s: %v", filePath, err)
 	}
-	//fmt.Println(includedRecords)
-
-	// Append the records from the included file directly to zoneConfig's records.
-	//fmt.Printf("Current record count: %d\n", len(zoneConfig.Spec.Primary.DefaultRRSetGroup))
-
-	// if zoneConfig.Spec.Primary.DefaultRRSetGroup == nil {
-	// 	//zoneConfig.Spec.Primary.DefaultRRSetGroup = []DNSRecord{} // Initialize the slice if it's nil
-	// 	zoneConfig.Spec.Primary.DefaultRRSetGroup = includedRecords
-	// 	//fmt.Println("No records, setting...")
-	// } else {
-	// 	//fmt.Println("Records, appending...")
-	// 	zoneConfig.Spec.Primary.DefaultRRSetGroup = append(zoneConfig.Spec.Primary.DefaultRRSetGroup, includedRecords...)
-	// }
 
 	return includedRecords, nil
 }
@@ -514,7 +501,6 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 				if len(parts) >= 3 {
 					includeOrigin = parts[2] // Override with specific origin if provided
 				}
-				fmt.Printf("Processing $INCLUDE: %v\n", includeOrigin)
 
 				includedRecords, err := processIncludeDirective(includeFilePath, includeOrigin, bindFileRootPath, zoneConfig)
 				if err != nil {
