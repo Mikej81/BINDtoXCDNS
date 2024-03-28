@@ -293,6 +293,48 @@ func isHostnameValid(hostname string) bool {
 	return matched
 }
 
+func consolidateTXTRecords(records []DNSRecord) ([]DNSRecord, error) {
+	// Initialize a map to hold consolidated TXT records by name
+	consolidatedRecordsMap := make(map[string]*DNSRecord)
+
+	// Other types of records can be directly appended to the final slice
+	var finalRecords []DNSRecord
+
+	for _, record := range records {
+		if record.TXTRecord != nil && record.TXTRecord.Name == "" {
+			// Handle TXT records without a hostname
+			key := "TXT-no-hostname"
+			if existingRecord, exists := consolidatedRecordsMap[key]; exists {
+				// Check if appending this record would exceed the limit
+				if len(existingRecord.TXTRecord.Values)+len(record.TXTRecord.Values) > 100 {
+					// Log an error with all values that won't be included
+					excessValues := record.TXTRecord.Values[100-len(existingRecord.TXTRecord.Values):]
+					fmt.Printf("Error: Exceeded TXT record values limit for records without a hostname. Excess values: %v\n", excessValues)
+					// Only append values up to the limit
+					existingRecord.TXTRecord.Values = append(existingRecord.TXTRecord.Values, record.TXTRecord.Values[:100-len(existingRecord.TXTRecord.Values)]...)
+				} else {
+					// Append values to the existing TXT record
+					existingRecord.TXTRecord.Values = append(existingRecord.TXTRecord.Values, record.TXTRecord.Values...)
+				}
+			} else {
+				// If it's the first record of its kind, add it to the map
+				newRecord := record // Make a copy to avoid modifying the original
+				consolidatedRecordsMap[key] = &newRecord
+			}
+		} else {
+			// Directly append non-TXT records or TXT records with a hostname
+			finalRecords = append(finalRecords, record)
+		}
+	}
+
+	// Append consolidated TXT records without a hostname to the final records slice
+	for _, record := range consolidatedRecordsMap {
+		finalRecords = append(finalRecords, *record)
+	}
+
+	return finalRecords, nil
+}
+
 func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindFileRootPath string) ([]DNSRecord, *ZoneConfig, error) {
 
 	fileDir := filepath.Clean(bindFileRootPath)
@@ -861,8 +903,16 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 		records = append(records, txtRecord)
 	}
 
-	// Step 1: Remove complete duplicates
+	// Remove complete duplicates
 	records = deduplicateDNSRecords(records)
+
+	// Consolidate TXT records without a hostname, handling any potential errors
+	records, err = consolidateTXTRecords(records)
+	if err != nil {
+		// Handle the error appropriately, perhaps by logging it or even stopping execution, depending on your needs
+		fmt.Printf("Error consolidating TXT records: %v\n", err)
+		//return // or continue based on your error handling strategy
+	}
 
 	zoneConfig.Metadata.Name = origin
 	//zoneConfig.Spec.Primary.DefaultRRSetGroup = records
