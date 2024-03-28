@@ -13,12 +13,13 @@ type DNSRecord struct {
 	TTL         int          `json:"ttl,omitempty"`
 	ARecord     *ARecord     `json:"a_record,omitempty"`
 	SRVRecord   *SRVRecord   `json:"srv_record,omitempty"`
-	MXRecord    *[]MXValue   `json:"mx_record,omitempty"`  // Assume MXValue struct includes Name if needed
-	TXTRecord   *TXTRecord   `json:"txt_record,omitempty"` // Adjust if a name field is needed
+	MXRecord    *[]MXValue   `json:"mx_record,omitempty"`
+	TXTRecord   *TXTRecord   `json:"txt_record,omitempty"`
 	CNAMERecord *CNAMERecord `json:"cname_record,omitempty"`
 	CAARecord   *CAARecord   `json:"caa_record,omitempty"`
 	NSRecord    *NSRecord    `json:"ns_record,omitempty"`
-	AAAARecord  *AAAARecord  `json:"aaaa_record,omitempty"` // Adjust similarly
+	AAAARecord  *AAAARecord  `json:"aaaa_record,omitempty"`
+	Description string       `json:"description,omitempty"`
 }
 
 // MXValue struct represents an individual MX record's priority and value.
@@ -67,6 +68,11 @@ type NSRecord struct {
 type TXTRecord struct {
 	Name   string   `json:"name,omitempty"`
 	Values []string `json:"values"`
+}
+
+type TXTRecordWithDesc struct {
+	TXTRecord   *TXTRecord
+	Description string
 }
 
 type SOAParameters struct {
