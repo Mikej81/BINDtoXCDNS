@@ -731,11 +731,24 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 			if len(parts) > recordValueStartIndex {
 				// First, extract the entire quoted string for the TXT value, including semicolons within quotes
 				quotedValueRegex := regexp.MustCompile(`"([^"]+)"`)
-				match := quotedValueRegex.FindStringSubmatch(line)
-				var recordValue, description string
+				matches := quotedValueRegex.FindAllStringSubmatch(line, -1)
+				var recordValues []string
+				var description string
 
-				if len(match) > 1 {
-					recordValue = match[1] // The quoted string, including any semicolons
+				for _, match := range matches {
+					if len(match) > 1 {
+						// Append each quoted string (without quotes) to recordValues
+						recordValues = append(recordValues, match[1])
+					}
+				}
+
+				// Concatenate all parts of the TXT record separated by a space
+				recordValue := strings.Join(recordValues, " ")
+
+				// Check the length of the concatenated recordValue
+				if len(recordValue) >= 512 {
+					fmt.Printf("Error: TXT record value too long (%d) and will not be included: %s\n", len(recordValue), recordValue)
+					continue // Skip adding this record
 				}
 
 				// Generate a key for each TXT record based on hostname and record value
@@ -909,9 +922,9 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 	// Consolidate TXT records without a hostname, handling any potential errors
 	records, err = consolidateTXTRecords(records)
 	if err != nil {
-		// Handle the error appropriately, perhaps by logging it or even stopping execution, depending on your needs
+		// Handle the error appropriately, perhaps by logging it or even stopping execution
 		fmt.Printf("Error consolidating TXT records: %v\n", err)
-		//return // or continue based on your error handling strategy
+		//return // or continue
 	}
 
 	zoneConfig.Metadata.Name = origin
