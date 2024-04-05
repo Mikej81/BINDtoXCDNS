@@ -14,6 +14,7 @@ import (
 )
 
 var processedFiles = make(map[string]bool)
+var lastSeenCNAMEHostname string = ""
 
 // This does nothing yet, I want to move the parsing of records into individual functions to account for better handling, so placeholder for future release
 
@@ -82,8 +83,6 @@ func processSOA(parts []string, soaParams *SOAParameters) {
 	ttl, _ := strconv.Atoi(strings.Fields(parts[0])[1])
 	soaParams.TTL = ttl
 }
-
-var lastSeenCNAMEHostname string = ""
 
 func processCNAME(line string, cnameRecordsMap map[string]*CNAMERecord, origin string, customOrigin string) error {
 	// Normalize the line by converting tabs to spaces and trimming extra spaces
