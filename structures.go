@@ -9,6 +9,17 @@ const (
 	RecordClass_any     = 255 // any class (spelled: *; appears only in the question section of a query; included for completeness)
 )
 
+const (
+	ColorReset  = "\033[0m"
+	ColorRed    = "\033[31m"
+	ColorGreen  = "\033[32m"
+	ColorYellow = "\033[33m"
+	ColorBlue   = "\033[34m"
+	ColorPurple = "\033[35m"
+	ColorCyan   = "\033[36m"
+	ColorWhite  = "\033[37m"
+)
+
 type DNSRecord struct {
 	TTL         int          `json:"ttl,omitempty"`
 	ARecord     *ARecord     `json:"a_record,omitempty"`
