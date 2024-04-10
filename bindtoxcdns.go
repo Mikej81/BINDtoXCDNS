@@ -122,6 +122,14 @@ func processCNAME(line string, cnameRecordsMap map[string]*CNAMERecord, origin s
 		lastSeenCNAMEHostname = hostname // Update the last seen hostname
 	}
 
+	// Check if hostname ends with the origin and remove it accordingly
+	if strings.HasSuffix(hostname, origin) {
+		// Subtract the length of origin from hostname to remove it
+		hostname = hostname[:len(hostname)-len(origin)]
+		// Optionally, remove any now-trailing dot from hostname
+		hostname = strings.TrimSuffix(hostname, ".")
+	}
+
 	valueIndex := cnameIndex + 1
 	if valueIndex >= len(parts) {
 		return fmt.Errorf("invalid CNAME record format: missing value")
@@ -129,6 +137,14 @@ func processCNAME(line string, cnameRecordsMap map[string]*CNAMERecord, origin s
 	isFQDN := false
 	value := strings.TrimSpace(parts[valueIndex])
 	value = strings.TrimSuffix(value, ".") // Ensure value does not end with a dot
+	value = strings.TrimSuffix(value, ".") // why it no good?
+
+	if !strings.Contains(value, ".") && !strings.Contains(value, origin) {
+		//add origin to value
+		tmpValue := value + "." + origin
+		value = tmpValue
+	}
+
 	value, isFQDN = ensureFQDN(value, customOrigin)
 
 	if !isFQDN {
@@ -137,9 +153,10 @@ func processCNAME(line string, cnameRecordsMap map[string]*CNAMERecord, origin s
 	}
 
 	// Special use-case to skip a record if the hostname or value ends with .hsep
-	if strings.HasSuffix(hostname, ".hsep") || strings.HasSuffix(value, ".hsep") {
-		fmt.Printf(ColorRed+"Warning:"+ColorYellow+" Cannot Map, [%s.%s] not importing:"+ColorReset+" %s\n", origin, customOrigin, line)
-		return nil // or return a special error if you want to handle this case differently
+	if strings.HasSuffix(value, ".hsep") {
+		//fmt.Printf(ColorRed+"Warning:"+ColorYellow+" Cannot Map, [%s.%s] not importing:"+ColorReset+" %s\n", origin, customOrigin, line)
+		//return nil // or return a special error if you want to handle this case differently
+		value = value + "." + origin
 	}
 
 	// Process the record
@@ -448,7 +465,7 @@ func removeConflictingCNAMEs(records []DNSRecord, origin string, includeOrigin s
 		if record.CNAMERecord != nil {
 			if _, exists := aRecordHostnames[record.CNAMERecord.Name]; exists {
 				// Log an error and skip adding this CNAME record
-				fmt.Printf(ColorRed+"Error:"+ColorYellow+" CNAME record for hostname '%s.%s' removed due to conflict with an A record: %s\n"+ColorReset, record.CNAMERecord.Name, includeOrigin, record.CNAMERecord.Value)
+				//fmt.Printf(ColorRed+"Error:"+ColorYellow+" CNAME record for hostname '%s at origin %s' removed due to conflict with an A record: %s\n"+ColorReset, record.CNAMERecord.Name, includeOrigin, record.CNAMERecord.Name)
 				//fmt.Printf("CNAME record name cannot be shared with other record types: A\n")
 				continue
 			}
@@ -471,7 +488,8 @@ func sanitizeValue(value string) string {
 // ensureFQDN checks if a given value is a proper FQDN. If not, it appends the origin.
 func ensureFQDN(value, origin string) (string, bool) {
 	// Simple pattern to match basic FQDN structure, without advanced assertions
-	fqdnPattern := regexp.MustCompile(`^(?:[a-zA-Z0-9-]{1,63}\.)+[a-zA-Z]{2,}$`)
+	fqdnPattern := regexp.MustCompile(`^(?:[a-zA-Z0-9-_]{1,63}\.)+[a-zA-Z]{2,}$`)
+
 	value = strings.TrimSuffix(value, ".") // Ensure no trailing dot for the validation
 
 	isFQDN := fqdnPattern.MatchString(value)
@@ -632,51 +650,55 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 			continue
 		}
 
-		// Handle $ORIGIN directive within the file only if customOrigin is not provided
-		if strings.HasPrefix(trimmedLine, "$ORIGIN") {
-			foundOrigin := strings.Fields(trimmedLine)[1]
-			if origin == "" || origin == customOrigin { // Update origin only if not set by user
-				origin = foundOrigin
-				if originalOrigin == customOrigin { // Only update originalOrigin if not overridden by user
-					originalOrigin = foundOrigin
+		if !onlyRecords {
+
+			// Handle $ORIGIN directive within the file only if customOrigin is not provided
+			if strings.HasPrefix(trimmedLine, "$ORIGIN") {
+				foundOrigin := strings.Fields(trimmedLine)[1]
+				if origin == "" || origin == customOrigin { // Update origin only if not set by user
+					origin = foundOrigin
+					if originalOrigin == customOrigin { // Only update originalOrigin if not overridden by user
+						originalOrigin = foundOrigin
+					}
 				}
+				zoneConfig.Metadata.Name = origin
+				continue
 			}
-			zoneConfig.Metadata.Name = origin
-			continue
-		}
 
-		// Use customOrigin as the default if no $ORIGIN directive was found in the file
-		if origin == "" {
-			// Since customOrigin is also "", no origin has been specified or detected
-			return nil, nil, fmt.Errorf("no $ORIGIN specified and none detected in the file")
-		}
+			// Use customOrigin as the default if no $ORIGIN directive was found in the file
+			if origin == "" {
+				// Since customOrigin is also "", no origin has been specified or detected
+				return nil, nil, fmt.Errorf("no $ORIGIN specified and none detected in the file")
+			}
 
-		// Special handling for $TTL
-		if strings.HasPrefix(trimmedLine, "$TTL") {
-			fields := strings.Fields(trimmedLine)
-			if len(fields) > 1 {
-				ttlValue, err := parseTTL(fields[1])
-				if err != nil {
-					fmt.Printf("Error parsing TTL value '%s': %v. Using default TTL: %d\n", fields[1], err, defaultTTLValue)
-					defaultTTL = defaultTTLValue // Use the default TTL if parsing fails
+			// Special handling for $TTL
+			if strings.HasPrefix(trimmedLine, "$TTL") {
+				fields := strings.Fields(trimmedLine)
+				if len(fields) > 1 {
+					ttlValue, err := parseTTL(fields[1])
+					if err != nil {
+						fmt.Printf("Error parsing TTL value '%s': %v. Using default TTL: %d\n", fields[1], err, defaultTTLValue)
+						defaultTTL = defaultTTLValue // Use the default TTL if parsing fails
+					} else {
+						defaultTTL = ttlValue // Update the default TTL with the parsed value
+					}
+				}
+				continue
+			}
+
+			if inSOARecord || strings.Contains(trimmedLine, "SOA") {
+				soaLines = append(soaLines, trimmedLine)
+				// Check if this is the last line of the SOA record
+				if strings.Contains(line, ")") {
+					inSOARecord = false // We've reached the end of the SOA record
+					processSOA(soaLines, &zoneConfig.Spec.Primary.SOAParameters)
+					soaLines = []string{} // Reset for safety
 				} else {
-					defaultTTL = ttlValue // Update the default TTL with the parsed value
+					inSOARecord = true // Continue collecting SOA lines
 				}
+				continue
 			}
-			continue
-		}
 
-		if inSOARecord || strings.Contains(trimmedLine, "SOA") {
-			soaLines = append(soaLines, trimmedLine)
-			// Check if this is the last line of the SOA record
-			if strings.Contains(line, ")") {
-				inSOARecord = false // We've reached the end of the SOA record
-				processSOA(soaLines, &zoneConfig.Spec.Primary.SOAParameters)
-				soaLines = []string{} // Reset for safety
-			} else {
-				inSOARecord = true // Continue collecting SOA lines
-			}
-			continue
 		}
 
 		// Handle the start and end of a zone block
@@ -787,7 +809,6 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 			}
 		}
 
-		// Adjust hostname based on includeOrigin if processing records only
 		// Adjust hostname based on includeOrigin if processing records only
 		if onlyRecords && includeOrigin != "" {
 			if hostname == "@" || hostname == "" {
@@ -1025,13 +1046,12 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 			parts := strings.Fields(trimmedLine)
 			if len(parts) >= 2 {
 				includeFilePath := filepath.Join(fileDir, parts[1]) // Construct the full path of the included file
-				//includeFilePath := fileDir
-				//includeOrigin = origin // Default to using the current origin if not specified in $INCLUDE
+				includeOrigin = origin                              // Default to using the current origin if not specified in $INCLUDE
 
 				if len(parts) >= 3 {
-					includeOrigin = parts[2] // Override with specific origin if provided
-				} else if len(parts) < 3 {
-					includeOrigin = origin
+					includeOrigin = parts[2] + "." + includeOrigin // Override with specific origin if provided
+					//fmt.Printf("Trying to import Include: %s with Origin: %s\n", parts[1], includeOrigin)
+					//fmt.Printf("Should we join %s to %s for %s\n", includeOrigin, origin, parts[1])
 				}
 
 				includedRecords, err := processIncludeDirective(includeFilePath, includeOrigin, bindFileRootPath)
@@ -1040,10 +1060,11 @@ func ParseZoneFile(filePath string, customOrigin string, onlyRecords bool, bindF
 				}
 
 				records = append(records, includedRecords...)
-
 			}
+
 			continue
 		}
+
 	}
 
 	// After parsing, create DNSRecord entries for the NS records
