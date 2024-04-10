@@ -155,7 +155,6 @@ func processCNAME(line string, cnameRecordsMap map[string]*CNAMERecord, origin s
 	// Special use-case to skip a record if the hostname or value ends with .hsep
 	if strings.HasSuffix(value, ".hsep") {
 		//fmt.Printf(ColorRed+"Warning:"+ColorYellow+" Cannot Map, [%s.%s] not importing:"+ColorReset+" %s\n", origin, customOrigin, line)
-		//return nil // or return a special error if you want to handle this case differently
 		value = value + "." + origin
 	}
 
